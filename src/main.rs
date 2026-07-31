@@ -1,8 +1,11 @@
 mod cli;
 mod commands;
+mod compiler;
+mod dependency;
 mod lockfile;
 mod manifest;
 mod registry;
+mod resolver;
 mod terminal;
 
 use clap::Parser;
@@ -16,7 +19,7 @@ fn main() -> anyhow::Result<()> {
 
         Commands::Authenticate => commands::authenticate::execute()?,
 
-        Commands::Build { release } => commands::build::execute(release)?,
+        Commands::Build { release } => commands::build::execute()?,
 
         Commands::Clean => commands::clean::execute()?,
 

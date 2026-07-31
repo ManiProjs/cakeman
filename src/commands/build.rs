@@ -1,17 +1,30 @@
 use anyhow::Result;
+use std::path::PathBuf;
 
-pub fn execute(release: bool) -> Result<()> {
-    println!("Building project...");
+use crate::{compiler, dependency, lockfile::Lockfile, manifest::Manifest, terminal};
 
-    if release {
-        println!("Release build");
-    }
+pub fn execute() -> Result<()> {
+    let manifest = Manifest::load("Cake.toml")?;
 
-    // TODO:
-    // - read Cake.cman
-    // - resolve dependencies
-    // - generate CMake
-    // - run cmake
+    terminal::info(&format!(
+        "Generating build files for {}...",
+        manifest.package.name
+    ));
+
+    let lockfile = Lockfile::load()?;
+
+    let includes = dependency::prepare_dependencies(&lockfile)?;
+
+    let include_dirs: Vec<String> = includes
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    compiler::generate_cmake(&manifest.package, &include_dirs)?;
+
+    compiler::run_cmake()?;
+
+    terminal::success("Build completed successfully!");
 
     Ok(())
 }
