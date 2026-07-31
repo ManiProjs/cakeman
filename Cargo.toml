@@ -6,6 +6,10 @@ license = "MIT"
 repository = "https://github.com/ManiProjs/cakeman.git"
 edition = "2024"
 
+[[bin]]
+name = "cman"
+path = "./src/main.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.5", features = ["derive"] }
@@ -16,4 +20,5 @@ owo-colors = "4.3.0"
 reqwest = { version = "0.13.4", features = ["blocking", "form", "json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+toml = "1.1.4"
 webbrowser = "1.2.2"
