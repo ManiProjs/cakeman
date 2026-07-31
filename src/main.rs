@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod lockfile;
 mod manifest;
 mod registry;
 mod terminal;

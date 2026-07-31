@@ -10,7 +10,7 @@ pub fn get_cake_manifest(name: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("Package name cannot be empty"))?;
 
     let url = format!(
-        "{}/{}/{}.cman",
+        "{}/{}/{}.toml",
         REGISTRY_URL,
         first_char.to_ascii_lowercase(),
         name
