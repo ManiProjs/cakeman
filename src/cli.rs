@@ -14,7 +14,14 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Add a dependency
-    Add { name: String },
+    Add {
+        /// Dependency name
+        name: String,
+
+        /// Dependency version (optional)
+        #[arg(short, long)]
+        version: Option<String>,
+    },
 
     /// Authenticate to GitHub
     Authenticate,

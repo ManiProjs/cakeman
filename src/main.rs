@@ -1,5 +1,7 @@
 mod cli;
 mod commands;
+mod manifest;
+mod registry;
 mod terminal;
 
 use clap::Parser;
@@ -9,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Add { name } => commands::add::execute(name)?,
+        Commands::Add { name, version } => commands::add::execute(name, version)?,
 
         Commands::Authenticate => commands::authenticate::execute()?,
 
