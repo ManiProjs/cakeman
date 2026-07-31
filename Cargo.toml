@@ -1,0 +1,13 @@
+[package]
+name = "cakeman"
+version = "0.1.0"
+description = "A no-nonsense package manager for C/C++"
+license = "MIT"
+repository = "https://github.com/ManiProjs/cakeman.git"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.5", features = ["derive"] }
+colored = "3.1.1"
+serde = "1.0.229"
