@@ -4,7 +4,7 @@ pub fn execute() -> Result<()> {
     println!("Making application");
 
     // TODO:
-    // - edit Cake.cman
+    // - edit Cake.toml
     // - download manifest
     // - update lockfile
 

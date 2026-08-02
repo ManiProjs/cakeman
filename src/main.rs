@@ -1,3 +1,4 @@
+mod auth;
 mod cli;
 mod commands;
 mod compiler;
@@ -11,15 +12,18 @@ mod terminal;
 use clap::Parser;
 use cli::{Cli, Commands};
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Add { name, version } => commands::add::execute(name, version)?,
+        Commands::Add { name, version } => commands::add::execute(name, version).await?,
 
-        Commands::Authenticate => commands::authenticate::execute()?,
+        Commands::Authenticate => commands::authenticate::execute().await?,
 
-        Commands::Build { release } => commands::build::execute()?,
+        Commands::Build { release } => commands::build::execute(release)?,
+
+        Commands::Install => commands::install::execute()?,
 
         Commands::Clean => commands::clean::execute()?,
 
@@ -29,7 +33,7 @@ fn main() -> anyhow::Result<()> {
 
         Commands::Pack => commands::pack::execute()?,
 
-        Commands::Publish => commands::publish::execute()?,
+        Commands::Publish => commands::publish::execute().await?,
 
         Commands::Remove { name } => commands::remove::execute(name)?,
 

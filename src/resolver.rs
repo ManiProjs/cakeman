@@ -1,12 +1,11 @@
 use anyhow::{Result, anyhow};
-use std::collections::HashSet;
+use serde::Deserialize;
+use std::{collections::HashSet, future::Future, pin::Pin};
 
 use crate::{
     lockfile::{LockedPackage, Lockfile},
     registry,
 };
-
-use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct CakeManifest {
@@ -34,41 +33,44 @@ impl Resolver {
         }
     }
 
-    pub fn resolve(
-        &mut self,
-        name: &str,
-        version: Option<&str>,
-        lockfile: &mut Lockfile,
-    ) -> Result<()> {
-        if self.visited.contains(name) {
-            return Ok(());
-        }
+    pub fn resolve<'a>(
+        &'a mut self,
+        name: &'a str,
+        version: Option<&'a str>,
+        lockfile: &'a mut Lockfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
+        Box::pin(async move {
+            if self.visited.contains(name) {
+                return Ok(());
+            }
 
-        self.visited.insert(name.to_string());
+            self.visited.insert(name.to_string());
 
-        let content = registry::get_cake_manifest(name)?;
+            let content = registry::get_cake_manifest(name).await?;
 
-        let manifest: CakeManifest = toml::from_str(&content)
-            .map_err(|e| anyhow!("Invalid manifest for {}: {}", name, e))?;
+            let manifest: CakeManifest = toml::from_str(&content)
+                .map_err(|e| anyhow!("Invalid manifest for {}: {}", name, e))?;
 
-        let resolved_version = match version {
-            Some(v) if v != "latest" => v.to_string(),
+            let resolved_version = match version {
+                Some(v) if v != "latest" => v.to_string(),
 
-            _ => manifest.package.version.clone(),
-        };
+                _ => manifest.package.version.clone(),
+            };
 
-        if !lockfile.contains(name) {
-            lockfile.add_package(LockedPackage {
-                name: manifest.package.name.clone(),
-                version: resolved_version,
-                repository: manifest.package.repository.clone(),
-            });
-        }
+            if !lockfile.contains(name) {
+                lockfile.add_package(LockedPackage {
+                    name: manifest.package.name.clone(),
+                    version: resolved_version,
+                    repository: manifest.package.repository.clone(),
+                });
+            }
 
-        for (dependency, dep_version) in manifest.dependencies {
-            self.resolve(&dependency, Some(&dep_version), lockfile)?;
-        }
+            for (dependency, dep_version) in manifest.dependencies {
+                self.resolve(&dependency, Some(&dep_version), lockfile)
+                    .await?;
+            }
 
-        Ok(())
+            Ok(())
+        })
     }
 }

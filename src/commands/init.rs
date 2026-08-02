@@ -42,7 +42,8 @@ pub fn execute(name: Option<String>) -> Result<()> {
         r#"[package]
 name = "{0}"
 version = "0.1.0"
-main = "src/main.c"
+type = "binary"
+language = "c"
 
 [dependencies]
 "#,

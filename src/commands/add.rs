@@ -1,9 +1,9 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use std::path::Path;
 
-use crate::{lockfile::Lockfile, manifest::Manifest, resolver::Resolver, terminal};
+use crate::{lockfile::Lockfile, manifest::Manifest, registry, resolver::Resolver, terminal};
 
-pub fn execute(name: String, version: Option<String>) -> Result<()> {
+pub async fn execute(name: String, version: Option<String>) -> Result<()> {
     let manifest_path = Path::new("Cake.toml");
 
     if !manifest_path.exists() {
@@ -20,23 +20,42 @@ pub fn execute(name: String, version: Option<String>) -> Result<()> {
         return Ok(());
     }
 
-    let requested_version = version.unwrap_or_else(|| "latest".to_string());
+    terminal::info(&format!("Searching {} in registry...", name));
 
-    terminal::info(&format!("Adding {}...", name));
+    let content = registry::get_cake_manifest(&name)
+        .await
+        .map_err(|_| anyhow!("Package '{}' was not found in registry", name))?;
 
-    // Add requested dependency to Cake.toml
+    let registry_manifest: toml::Value = toml::from_str(&content)?;
+
+    let latest_version = registry_manifest
+        .get("package")
+        .and_then(|p| p.get("version"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("Invalid registry manifest for {}", name))?
+        .to_string();
+
+    let resolved_version = match version.as_deref() {
+        Some(v) if v != "latest" => v.to_string(),
+
+        _ => latest_version,
+    };
+
+    terminal::info(&format!("Found {} {}", name, resolved_version));
+
     manifest
         .dependencies
-        .insert(name.clone(), requested_version.clone());
+        .insert(name.clone(), resolved_version.clone());
 
     manifest.save(manifest_path)?;
 
-    // Resolve dependency tree
     let mut lockfile = Lockfile::load()?;
 
     let mut resolver = Resolver::new();
 
-    resolver.resolve(&name, Some(&requested_version), &mut lockfile)?;
+    resolver
+        .resolve(&name, Some(&resolved_version), &mut lockfile)
+        .await?;
 
     lockfile.save()?;
 

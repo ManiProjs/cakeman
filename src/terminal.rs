@@ -17,6 +17,10 @@ pub fn error(message: &str) {
     eprintln!("{} {}", "✗".red().bold(), message);
 }
 
+pub fn hint(message: &str) {
+    println!("{} {}", "💡".cyan(), message);
+}
+
 pub fn debug(message: &str) {
     println!("{} {}", "DEBUG".magenta().bold(), message.dimmed());
 }

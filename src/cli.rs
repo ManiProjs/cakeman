@@ -32,6 +32,9 @@ pub enum Commands {
         release: bool,
     },
 
+    /// Install a binary
+    Install,
+
     /// Remove build artifacts
     Clean,
 

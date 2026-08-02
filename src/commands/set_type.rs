@@ -1,29 +1,20 @@
 use anyhow::{Result, anyhow};
 use std::fs;
-use std::path::Path;
 
-use crate::terminal;
-
-pub fn execute(cake_name: String) -> Result<()> {
-    let default_manifest = Path::new("Cake.toml");
-    let filename = &format!("{}.toml", cake_name);
-    let named_manifest = Path::new(filename);
-
-    if default_manifest.exists() {
-        fs::rename(default_manifest, named_manifest)?;
-
-        terminal::success(&format!("Renamed Cake.cman to {}.cman", cake_name));
-
-        return Ok(());
+pub fn execute(package_type: String) -> Result<()> {
+    if package_type != "library" && package_type != "binary" {
+        return Err(anyhow!("Type must be library or binary"));
     }
 
-    if named_manifest.exists() {
-        fs::rename(named_manifest, default_manifest)?;
+    let content = fs::read_to_string("Cake.toml")?;
 
-        terminal::success("Renamed project manifest to Cake.cman");
+    let mut doc = content.parse::<toml_edit::DocumentMut>()?;
 
-        return Ok(());
-    }
+    doc["package"]["type"] = toml_edit::value(package_type);
 
-    Err(anyhow!("No Cakeman manifest found"))
+    fs::write("Cake.toml", doc.to_string())?;
+
+    println!("Updated package type");
+
+    Ok(())
 }

@@ -3,6 +3,7 @@ pub mod authenticate;
 pub mod build;
 pub mod clean;
 pub mod init;
+pub mod install;
 pub mod make;
 pub mod pack;
 pub mod publish;

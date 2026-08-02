@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path};
 
@@ -14,13 +14,19 @@ pub struct Manifest {
 pub struct Package {
     pub name: String,
     pub version: String,
-    pub main: String,
+    pub repository: String,
+
+    #[serde(rename = "type")]
+    pub package_type: Option<String>,
+
+    pub language: Option<String>,
 }
 
 impl Manifest {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let manifest: Manifest = toml::from_str(&content)?;
+
+        let manifest = toml::from_str(&content)?;
 
         Ok(manifest)
     }
@@ -29,6 +35,14 @@ impl Manifest {
         let content = toml::to_string_pretty(self)?;
 
         fs::write(path, content)?;
+
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.package.repository.trim().is_empty() {
+            return Err(anyhow!("Package repository is required"));
+        }
 
         Ok(())
     }
