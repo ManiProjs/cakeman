@@ -27,6 +27,24 @@ impl Installer {
         Self { multi }
     }
 
+    pub async fn download(&self, name: &str) -> Result<()> {
+        let progress = self.spinner(format!("Downloading {}", name));
+
+        let content = registry::get_cake_manifest(name).await?;
+
+        let manifest: Manifest = toml::from_str(&content)?;
+
+        let package_dir = packages_dir()?.join(name);
+
+        if !package_dir.exists() {
+            clone_package(&manifest.package.repository, &package_dir)?;
+        }
+
+        progress.finish_with_message(format!("✓ Downloaded {}", name));
+
+        Ok(())
+    }
+
     pub fn install<'a>(&'a self, name: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
         Box::pin(async move {
             let installed_path = cakeman_dir()?.join("installed.toml");
@@ -37,35 +55,19 @@ impl Installer {
                 return Ok(());
             }
 
-            let progress = self.multi.add(ProgressBar::new(100));
-
-            progress.set_style(
-                ProgressStyle::with_template(
-                    "  {spinner:.cyan} {msg:<25} [{bar:30.cyan}] {percent}% {eta}",
-                )?
-                .progress_chars("━╸"),
-            );
-
-            progress.set_message(format!("Installing {}", name));
-
-            let registry_manifest = registry::get_cake_manifest(name).await?;
-
-            let manifest: Manifest = toml::from_str(&registry_manifest)?;
+            let progress = self.progress(format!("Installing {}", name));
 
             let package_dir = packages_dir()?.join(name);
 
-            if !package_dir.exists() {
-                clone_package(&manifest.package.repository, &package_dir)?;
-            }
-
-            progress.set_message(format!("Building {}", name));
-            progress.set_position(30);
-
             generate_cmake(&package_dir)?;
+
+            progress.set_position(30);
 
             build_package(&package_dir)?;
 
             progress.set_position(90);
+
+            let manifest = Manifest::load(&package_dir.join("Cake.toml"))?;
 
             record_install(
                 &manifest.package.name,
@@ -73,14 +75,38 @@ impl Installer {
                 manifest.dependencies.keys().cloned().collect(),
             )?;
 
-            progress.set_position(100);
-
             progress.finish_and_clear();
 
             terminal::info(&format!("✓ Installed {}", name));
 
             Ok(())
         })
+    }
+
+    fn spinner(&self, message: String) -> ProgressBar {
+        let bar = self.multi.add(ProgressBar::new_spinner());
+
+        bar.set_style(ProgressStyle::with_template("  {spinner:.cyan} {msg}").unwrap());
+
+        bar.set_message(message);
+
+        bar
+    }
+
+    fn progress(&self, message: String) -> ProgressBar {
+        let bar = self.multi.add(ProgressBar::new(100));
+
+        bar.set_style(
+            ProgressStyle::with_template(
+                "  {spinner:.cyan} {msg:<30} [{bar:30.cyan}] {percent}% {eta}",
+            )
+            .unwrap()
+            .progress_chars("━╸"),
+        );
+
+        bar.set_message(message);
+
+        bar
     }
 }
 
@@ -102,6 +128,16 @@ pub async fn execute(names: Vec<String>) -> Result<()> {
     let multi = MultiProgress::new();
 
     let installer = Installer::new(multi.clone());
+
+    // Phase 1: Download everything
+    terminal::info("Downloading packages...");
+
+    for package in &lockfile.package {
+        installer.download(&package.name).await?;
+    }
+
+    // Phase 2: Install everything
+    terminal::info("Installing packages...");
 
     for package in &lockfile.package {
         installer.install(&package.name).await?;
@@ -134,6 +170,8 @@ fn clone_package(repository: &str, destination: &Path) -> Result<()> {
             repository,
             destination.to_str().unwrap(),
         ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()?;
 
     if !status.success() {
