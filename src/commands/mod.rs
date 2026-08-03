@@ -9,3 +9,4 @@ pub mod pack;
 pub mod publish;
 pub mod remove;
 pub mod set_type;
+pub mod uninstall;

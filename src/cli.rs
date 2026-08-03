@@ -2,9 +2,9 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "cakeman",
-    version,
-    about = "A C/C++ package manager and build system"
+    name = "cman",
+    version = "v0.1.0",
+    about = "A no-nonsense C/C++ package manager"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -33,13 +33,21 @@ pub enum Commands {
     },
 
     /// Install a binary
-    Install,
+    Install {
+        name: String,
+    },
+
+    Uninstall {
+        name: String,
+    },
 
     /// Remove build artifacts
     Clean,
 
     /// Create a new project
-    Init { name: Option<String> },
+    Init {
+        name: Option<String>,
+    },
 
     /// Make/build package
     Make,
@@ -51,8 +59,12 @@ pub enum Commands {
     Publish,
 
     /// Remove dependency
-    Remove { name: String },
+    Remove {
+        name: String,
+    },
 
     /// Change project type
-    SetType { package_type: String },
+    SetType {
+        package_type: String,
+    },
 }

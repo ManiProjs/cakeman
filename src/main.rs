@@ -3,6 +3,7 @@ mod cli;
 mod commands;
 mod compiler;
 mod dependency;
+mod installed;
 mod lockfile;
 mod manifest;
 mod registry;
@@ -23,7 +24,9 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Build { release } => commands::build::execute(release)?,
 
-        Commands::Install => commands::install::execute()?,
+        Commands::Install { name } => commands::install::execute(name).await?,
+
+        Commands::Uninstall { name } => commands::uninstall::execute(name)?,
 
         Commands::Clean => commands::clean::execute()?,
 

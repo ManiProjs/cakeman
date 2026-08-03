@@ -13,7 +13,7 @@ pub fn generate_cmake(
     let cmake = match package.package_type.as_deref() {
         Some("library") => generate_library_cmake(package, include_dirs, dependencies),
 
-        _ => generate_binary_cmake(package, include_dirs, dependencies),
+        _ => generate_binary_cmake(package, include_dirs, dependencies, true),
     };
 
     fs::write("CMakeLists.txt", cmake)?;
@@ -24,54 +24,23 @@ pub fn generate_cmake(
 pub fn generate_dependency_cmake(manifest: &Manifest) -> Result<String> {
     let package = &manifest.package;
 
-    let ext = source_extension(package);
-    let language = cmake_language(package);
-
     let dependencies = manifest.dependencies.keys().cloned().collect::<Vec<_>>();
 
-    let deps = format_dependencies(&dependencies);
+    let cakeman_include = dirs::home_dir()
+        .ok_or_else(|| anyhow!("Cannot find home directory"))?
+        .join(".cakeman/include")
+        .to_string_lossy()
+        .to_string();
 
-    let link_section = if dependencies.is_empty() {
-        String::new()
-    } else {
-        format!(
-            r#"
-target_link_libraries(
-    {name}
-    PUBLIC
-{deps}
-)
-"#,
-            name = package.name,
-            deps = deps,
-        )
+    let includes = vec!["include".to_string(), cakeman_include];
+
+    let cmake = match package.package_type.as_deref() {
+        Some("library") => generate_library_cmake(package, &includes, &dependencies),
+
+        _ => generate_binary_cmake(package, &includes, &dependencies, false),
     };
 
-    Ok(format!(
-        r#"cmake_minimum_required(VERSION 3.20)
-
-project({name}
-    VERSION {version}
-    LANGUAGES {language}
-)
-
-add_library(
-    {name}
-    src/{name}.{ext}
-)
-
-target_include_directories(
-    {name}
-    PUBLIC
-    include
-){link_section}
-"#,
-        name = package.name,
-        version = package.version,
-        language = language,
-        ext = ext,
-        link_section = link_section,
-    ))
+    Ok(cmake)
 }
 
 fn generate_library_cmake(
@@ -121,6 +90,17 @@ target_include_directories(
 )
 
 {link_section}
+
+install(
+    TARGETS {name}
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+)
+
+install(
+    DIRECTORY include/
+    DESTINATION include
+)
 "#,
         name = package.name,
         version = package.version,
@@ -135,6 +115,7 @@ fn generate_binary_cmake(
     package: &Package,
     include_dirs: &[String],
     dependencies: &[String],
+    local_dependencies: bool,
 ) -> String {
     let includes = format_include_dirs(include_dirs);
     let deps = format_dependencies(dependencies);
@@ -155,6 +136,50 @@ target_link_libraries(
         )
     };
 
+    let link_dirs = if local_dependencies {
+        String::new()
+    } else {
+        let cakeman_lib = dirs::home_dir()
+            .unwrap()
+            .join(".cakeman/lib")
+            .to_string_lossy()
+            .to_string();
+
+        format!(
+            r#"
+target_link_directories(
+    {name}
+    PRIVATE
+    {cakeman_lib}
+)
+"#,
+            name = package.name,
+            cakeman_lib = cakeman_lib,
+        )
+    };
+
+    let rpath = if local_dependencies {
+        String::new()
+    } else {
+        let cakeman_lib = dirs::home_dir()
+            .unwrap()
+            .join(".cakeman/lib")
+            .to_string_lossy()
+            .to_string();
+
+        format!(
+            r#"
+set_target_properties(
+    {name}
+    PROPERTIES
+    INSTALL_RPATH "{cakeman_lib}"
+)
+"#,
+            name = package.name,
+            cakeman_lib = cakeman_lib,
+        )
+    };
+
     let ext = source_extension(package);
     let language = cmake_language(package);
 
@@ -163,11 +188,15 @@ target_link_libraries(
         _ => "main.cpp",
     };
 
-    let subdirs = dependencies
-        .iter()
-        .map(|dep| format!("add_subdirectory(.cake/packages/{})", dep))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let subdirs = if local_dependencies {
+        dependencies
+            .iter()
+            .map(|dep| format!("add_subdirectory(.cake/packages/{})", dep))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    };
 
     format!(
         r#"cmake_minimum_required(VERSION 3.20)
@@ -190,13 +219,24 @@ target_include_directories(
 {includes}
 )
 
+{link_dirs}
+
+{rpath}
+
 {link_section}
+
+install(
+    TARGETS {name}
+    RUNTIME DESTINATION bin
+)
 "#,
         name = package.name,
         version = package.version,
         language = language,
         source = source,
         includes = includes,
+        link_dirs = link_dirs,
+        rpath = rpath,
         link_section = link_section,
         subdirs = subdirs,
     )
