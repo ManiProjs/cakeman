@@ -27,11 +27,11 @@ pub fn execute(release: bool) -> Result<()> {
 
     terminal::info("Preparing dependencies...");
 
-    let includes = dependency::prepare_dependencies(&lockfile)?;
+    let dependencies = dependency::prepare_dependencies(&lockfile)?;
 
-    let include_dirs: Vec<String> = includes
+    let include_dirs: Vec<String> = dependencies
         .iter()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|dep| dep.path.join("include").to_string_lossy().to_string())
         .collect();
 
     let build_dir = Path::new(".cake").join("build").join(profile);
@@ -42,7 +42,13 @@ pub fn execute(release: bool) -> Result<()> {
 
     terminal::info("Generating build files...");
 
-    compiler::generate_cmake(&manifest, &include_dirs)?;
+    let dependencies = lockfile
+        .package
+        .iter()
+        .map(|pkg| pkg.name.clone())
+        .collect::<Vec<_>>();
+
+    compiler::generate_cmake(&manifest, &include_dirs, &dependencies)?;
 
     compiler::run_cmake(&build_dir, release)?;
 

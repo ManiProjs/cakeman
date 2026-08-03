@@ -1,17 +1,44 @@
 use anyhow::{Result, anyhow};
 use std::{
     fs,
-    io::Stdout,
     path::{Path, PathBuf},
     process::Command,
 };
 
-use crate::lockfile::Lockfile;
+use crate::{compiler, terminal};
+use crate::{lockfile::Lockfile, manifest::Manifest};
 
-const PACKAGE_DIR: &str = ".cman/packages";
+const PACKAGE_DIR: &str = ".cake/packages";
 
-pub fn prepare_dependencies(lockfile: &Lockfile) -> Result<Vec<PathBuf>> {
-    let mut includes = Vec::new();
+pub struct Dependency {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+fn generate_dependency_cmake(path: &Path) -> Result<()> {
+    let manifest_path = path.join("Cake.toml");
+
+    if !manifest_path.exists() {
+        return Err(anyhow!("Package does not contain Cake.toml"));
+    }
+
+    let manifest = Manifest::load(&manifest_path)?;
+
+    let cmake_path = path.join("CMakeLists.txt");
+
+    if cmake_path.exists() {
+        return Ok(());
+    }
+
+    let cmake = compiler::generate_dependency_cmake(&manifest)?;
+
+    fs::write(cmake_path, cmake)?;
+
+    Ok(())
+}
+
+pub fn prepare_dependencies(lockfile: &Lockfile) -> Result<Vec<Dependency>> {
+    let mut dependencies = Vec::new();
 
     fs::create_dir_all(PACKAGE_DIR)?;
 
@@ -19,21 +46,24 @@ pub fn prepare_dependencies(lockfile: &Lockfile) -> Result<Vec<PathBuf>> {
         let package_path = Path::new(PACKAGE_DIR).join(&package.name);
 
         if !package_path.exists() {
-            clone_package(&package.repository, &package_path)?;
+            clone_package(&package.repository, &package.version, &package_path)?;
+        } else {
+            terminal::info(&format!("Using cached {}", package.name));
         }
 
-        let include_path = package_path.join("include");
+        generate_dependency_cmake(&package_path)?;
 
-        if include_path.exists() {
-            includes.push(include_path);
-        }
+        dependencies.push(Dependency {
+            name: package.name.clone(),
+            path: package_path,
+        });
     }
 
-    Ok(includes)
+    Ok(dependencies)
 }
 
-fn clone_package(repository: &str, destination: &Path) -> Result<()> {
-    println!("Downloading {}...", repository);
+fn clone_package(repository: &str, version: &str, destination: &Path) -> Result<()> {
+    terminal::info(&format!("Downloading {}...", repository));
 
     let status = Command::new("git")
         .arg("clone")
@@ -43,6 +73,26 @@ fn clone_package(repository: &str, destination: &Path) -> Result<()> {
 
     if !status.success() {
         return Err(anyhow!("Failed to clone {}", repository));
+    }
+
+    let status = Command::new("git")
+        .current_dir(destination)
+        .args(["checkout", &format!("v{}", version)])
+        .status()?;
+
+    if !status.success() {
+        let status = Command::new("git")
+            .current_dir(destination)
+            .args(["checkout", version])
+            .status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Version {} not found", version));
+        }
+    }
+
+    if !status.success() {
+        return Err(anyhow!("Failed to checkout {}", version));
     }
 
     Ok(())
