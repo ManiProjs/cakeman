@@ -6,12 +6,20 @@ use std::{
 
 use crate::{installed::Installed, terminal};
 
-pub fn execute(name: String) -> Result<()> {
+pub fn execute(names: Vec<String>) -> Result<()> {
+    for name in names {
+        uninstall(&name)?;
+    }
+
+    Ok(())
+}
+
+fn uninstall(name: &str) -> Result<()> {
     let installed_path = cakeman_dir()?.join("installed.toml");
 
     let mut installed = Installed::load(&installed_path)?;
 
-    let dependents = installed.dependents(&name);
+    let dependents = installed.dependents(name);
 
     if !dependents.is_empty() {
         return Err(anyhow!(
@@ -23,7 +31,7 @@ pub fn execute(name: String) -> Result<()> {
 
     terminal::info(&format!("Uninstalling {}...", name));
 
-    let package_dir = packages_dir()?.join(&name);
+    let package_dir = packages_dir()?.join(name);
 
     if !package_dir.exists() {
         return Err(anyhow!("Package '{}' is not installed", name));
@@ -37,7 +45,7 @@ pub fn execute(name: String) -> Result<()> {
 
     fs::remove_dir_all(&package_dir)?;
 
-    installed.remove(&name);
+    installed.remove(name);
 
     installed.save(&installed_path)?;
 
@@ -65,7 +73,11 @@ fn remove_installed_files(manifest: &Path) -> Result<()> {
         if path.exists() {
             terminal::info(&format!("Removing {}", path.display()));
 
-            fs::remove_file(path)?;
+            if path.is_dir() {
+                fs::remove_dir_all(path)?;
+            } else {
+                fs::remove_file(path)?;
+            }
         }
     }
 

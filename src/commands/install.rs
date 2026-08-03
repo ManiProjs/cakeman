@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::{
-    collections::HashSet,
     fs,
     future::Future,
     path::{Path, PathBuf},
@@ -11,62 +11,61 @@ use std::{
 use crate::{
     compiler,
     installed::{Installed, InstalledPackage},
+    lockfile::Lockfile,
     manifest::Manifest,
-    registry, terminal,
+    registry,
+    resolver::Resolver,
+    terminal,
 };
 
 pub struct Installer {
-    installed: HashSet<String>,
+    multi: MultiProgress,
 }
 
 impl Installer {
-    pub fn new() -> Self {
-        Self {
-            installed: HashSet::new(),
-        }
+    pub fn new(multi: MultiProgress) -> Self {
+        Self { multi }
     }
 
-    pub fn install<'a>(
-        &'a mut self,
-        name: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
+    pub fn install<'a>(&'a self, name: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
         Box::pin(async move {
-            if self.installed.contains(name) {
-                return Ok(());
-            }
-
-            self.installed.insert(name.to_string());
-
             let installed_path = cakeman_dir()?.join("installed.toml");
+
             let installed = Installed::load(&installed_path)?;
 
             if installed.contains(name) {
-                terminal::info(&format!("{} is already installed", name));
                 return Ok(());
             }
 
-            terminal::info(&format!("Installing {}...", name));
+            let progress = self.multi.add(ProgressBar::new(100));
+
+            progress.set_style(
+                ProgressStyle::with_template(
+                    "  {spinner:.cyan} {msg:<25} [{bar:30.cyan}] {percent}% {eta}",
+                )?
+                .progress_chars("━╸"),
+            );
+
+            progress.set_message(format!("Installing {}", name));
 
             let registry_manifest = registry::get_cake_manifest(name).await?;
 
             let manifest: Manifest = toml::from_str(&registry_manifest)?;
 
-            // Install dependencies first
-            for (dependency, _) in &manifest.dependencies {
-                self.install(dependency).await?;
-            }
-
             let package_dir = packages_dir()?.join(name);
 
-            if package_dir.exists() {
-                terminal::info(&format!("Using cached {}", name));
-            } else {
+            if !package_dir.exists() {
                 clone_package(&manifest.package.repository, &package_dir)?;
             }
+
+            progress.set_message(format!("Building {}", name));
+            progress.set_position(30);
 
             generate_cmake(&package_dir)?;
 
             build_package(&package_dir)?;
+
+            progress.set_position(90);
 
             record_install(
                 &manifest.package.name,
@@ -74,17 +73,43 @@ impl Installer {
                 manifest.dependencies.keys().cloned().collect(),
             )?;
 
+            progress.set_position(100);
+
+            progress.finish_and_clear();
+
+            terminal::info(&format!("✓ Installed {}", name));
+
             Ok(())
         })
     }
 }
 
-pub async fn execute(name: String) -> Result<()> {
-    let mut installer = Installer::new();
+pub async fn execute(names: Vec<String>) -> Result<()> {
+    terminal::info("Resolving dependencies...");
 
-    installer.install(&name).await?;
+    let mut lockfile = Lockfile::load()?;
 
-    terminal::success(&format!("Installed {}", name));
+    let mut resolver = Resolver::new();
+
+    for name in &names {
+        resolver.resolve(name, None, &mut lockfile).await?;
+    }
+
+    lockfile.save()?;
+
+    fs::create_dir_all(cakeman_dir()?)?;
+
+    let multi = MultiProgress::new();
+
+    let installer = Installer::new(multi.clone());
+
+    for package in &lockfile.package {
+        installer.install(&package.name).await?;
+    }
+
+    multi.clear()?;
+
+    terminal::success("Installation complete");
 
     Ok(())
 }
@@ -102,10 +127,13 @@ fn packages_dir() -> Result<PathBuf> {
 fn clone_package(repository: &str, destination: &Path) -> Result<()> {
     fs::create_dir_all(destination.parent().unwrap())?;
 
-    terminal::info(&format!("Downloading {}", repository));
-
     let status = Command::new("git")
-        .args(["clone", repository, destination.to_str().unwrap()])
+        .args([
+            "clone",
+            "--quiet",
+            repository,
+            destination.to_str().unwrap(),
+        ])
         .status()?;
 
     if !status.success() {
@@ -124,11 +152,6 @@ fn generate_cmake(path: &Path) -> Result<()> {
 
     let manifest = Manifest::load(&manifest_path)?;
 
-    terminal::info(&format!(
-        "Generating CMakeLists for {} ({:?})",
-        manifest.package.name, manifest.package.package_type
-    ));
-
     let cmake = compiler::generate_dependency_cmake(&manifest)?;
 
     fs::write(path.join("CMakeLists.txt"), cmake)?;
@@ -137,8 +160,6 @@ fn generate_cmake(path: &Path) -> Result<()> {
 }
 
 fn build_package(path: &Path) -> Result<()> {
-    terminal::info("Building package...");
-
     let status = Command::new("cmake")
         .args([
             "-S",
@@ -150,6 +171,8 @@ fn build_package(path: &Path) -> Result<()> {
             "-DCMAKE_BUILD_TYPE=Release",
         ])
         .current_dir(path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()?;
 
     if !status.success() {
@@ -159,19 +182,21 @@ fn build_package(path: &Path) -> Result<()> {
     let status = Command::new("cmake")
         .args(["--build", "build"])
         .current_dir(path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()?;
 
     if !status.success() {
         return Err(anyhow!("Build failed"));
     }
 
-    terminal::info("Installing package...");
-
     let prefix = cakeman_dir()?;
 
     let status = Command::new("cmake")
         .args(["--install", "build", "--prefix", prefix.to_str().unwrap()])
         .current_dir(path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()?;
 
     if !status.success() {

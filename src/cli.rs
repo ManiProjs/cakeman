@@ -16,7 +16,7 @@ pub enum Commands {
     /// Add a dependency
     Add {
         /// Dependency name
-        name: String,
+        name: Vec<String>,
 
         /// Dependency version (optional)
         #[arg(short, long)]
@@ -34,11 +34,11 @@ pub enum Commands {
 
     /// Install a binary
     Install {
-        name: String,
+        name: Vec<String>,
     },
 
     Uninstall {
-        name: String,
+        name: Vec<String>,
     },
 
     /// Remove build artifacts
@@ -60,7 +60,7 @@ pub enum Commands {
 
     /// Remove dependency
     Remove {
-        name: String,
+        name: Vec<String>,
     },
 
     /// Change project type
