@@ -237,10 +237,10 @@ pub fn run_cmake(build_dir: &Path, release: bool) -> Result<()> {
 
     let mut command = Command::new("cmake");
 
-    command.args(["-S", ".", "-B", &build_dir]);
+    command.args(["-S", ".", "-B", &build_dir, "-G", "Ninja"]);
 
     if release {
-        command.args(["-DCMAKE_BUILD_TYPE=Release"]);
+        command.arg("-DCMAKE_BUILD_TYPE=Release");
     }
 
     let status = command.status()?;
@@ -249,9 +249,13 @@ pub fn run_cmake(build_dir: &Path, release: bool) -> Result<()> {
         return Err(anyhow!("CMake configuration failed"));
     }
 
-    Command::new("cmake")
+    let status = Command::new("cmake")
         .args(["--build", &build_dir])
         .status()?;
+
+    if !status.success() {
+        return Err(anyhow!("Build failed"));
+    }
 
     Ok(())
 }
