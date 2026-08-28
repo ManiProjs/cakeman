@@ -1,12 +1,13 @@
 use anyhow::{Result, anyhow};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::{
     fs,
-    future::Future,
     path::{Path, PathBuf},
-    pin::Pin,
     process::Command,
+    sync::Arc,
 };
+
+use tokio::sync::Mutex;
 
 use crate::{
     compiler,
@@ -19,16 +20,20 @@ use crate::{
 };
 
 pub struct Installer {
-    multi: MultiProgress,
+    progress: ProgressBar,
+    installed: Arc<Mutex<Vec<String>>>,
 }
 
 impl Installer {
-    pub fn new(multi: MultiProgress) -> Self {
-        Self { multi }
+    pub fn new(progress: ProgressBar) -> Self {
+        Self {
+            progress,
+            installed: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
     pub async fn download(&self, name: &str) -> Result<()> {
-        let progress = self.spinner(format!("Downloading {}", name));
+        self.progress.set_message(format!("Downloading {}", name));
 
         let content = registry::get_cake_manifest(name).await?;
 
@@ -40,73 +45,56 @@ impl Installer {
             clone_package(&manifest.package.repository, &package_dir)?;
         }
 
-        progress.finish_with_message(format!("✓ Downloaded {}", name));
+        self.progress.inc(1);
 
         Ok(())
     }
 
-    pub fn install<'a>(&'a self, name: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
-        Box::pin(async move {
-            let installed_path = cakeman_dir()?.join("installed.toml");
+    pub async fn install(&self, name: &str) -> Result<()> {
+        {
+            let installed = self.installed.lock().await;
 
-            let installed = Installed::load(&installed_path)?;
-
-            if installed.contains(name) {
+            if installed.contains(&name.to_string()) {
                 return Ok(());
             }
+        }
 
-            let progress = self.progress(format!("Installing {}", name));
+        let installed_path = cakeman_dir()?.join("installed.toml");
 
-            let package_dir = packages_dir()?.join(name);
+        let installed = Installed::load(&installed_path)?;
 
-            generate_cmake(&package_dir)?;
+        if installed.contains(name) {
+            self.progress.inc(1);
+            return Ok(());
+        }
 
-            progress.set_position(30);
+        self.progress.set_message(format!("Installing {}", name));
 
-            build_package(&package_dir)?;
+        let package_dir = packages_dir()?.join(name);
 
-            progress.set_position(90);
+        generate_cmake(&package_dir)?;
 
-            let manifest = Manifest::load(&package_dir.join("Cake.toml"))?;
+        build_package(&package_dir)?;
 
-            record_install(
-                &manifest.package.name,
-                &manifest.package.version,
-                manifest.dependencies.keys().cloned().collect(),
-            )?;
+        let manifest = Manifest::load(&package_dir.join("Cake.toml"))?;
 
-            progress.finish_and_clear();
+        record_install(
+            &manifest.package.name,
+            &manifest.package.version,
+            manifest.dependencies.keys().cloned().collect(),
+        )?;
 
-            terminal::info(&format!("✓ Installed {}", name));
+        {
+            let mut installed = self.installed.lock().await;
 
-            Ok(())
-        })
-    }
+            installed.push(name.to_string());
+        }
 
-    fn spinner(&self, message: String) -> ProgressBar {
-        let bar = self.multi.add(ProgressBar::new_spinner());
+        self.progress.inc(1);
 
-        bar.set_style(ProgressStyle::with_template("  {spinner:.cyan} {msg}").unwrap());
+        terminal::info(&format!("✓ Installed {}", name));
 
-        bar.set_message(message);
-
-        bar
-    }
-
-    fn progress(&self, message: String) -> ProgressBar {
-        let bar = self.multi.add(ProgressBar::new(100));
-
-        bar.set_style(
-            ProgressStyle::with_template(
-                "  {spinner:.cyan} {msg:<30} [{bar:30.cyan}] {percent}% {eta}",
-            )
-            .unwrap()
-            .progress_chars("━╸"),
-        );
-
-        bar.set_message(message);
-
-        bar
+        Ok(())
     }
 }
 
@@ -125,25 +113,44 @@ pub async fn execute(names: Vec<String>) -> Result<()> {
 
     fs::create_dir_all(cakeman_dir()?)?;
 
-    let multi = MultiProgress::new();
+    let total = lockfile.package.len() as u64;
 
-    let installer = Installer::new(multi.clone());
+    let progress = ProgressBar::new(total);
 
-    // Phase 1: Download everything
+    progress.set_style(
+        ProgressStyle::with_template(
+            "{spinner:.cyan} {msg:<30} [{bar:40.cyan}] {pos}/{len} {eta}",
+        )?
+        .progress_chars("━╸"),
+    );
+
+    progress.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    let installer = Installer::new(progress.clone());
+
+    //
+    // Download everything first
+    //
+
     terminal::info("Downloading packages...");
 
     for package in &lockfile.package {
         installer.download(&package.name).await?;
     }
 
-    // Phase 2: Install everything
+    progress.set_position(0);
+
+    //
+    // Install everything
+    //
+
     terminal::info("Installing packages...");
 
     for package in &lockfile.package {
         installer.install(&package.name).await?;
     }
 
-    multi.clear()?;
+    progress.finish_and_clear();
 
     terminal::success("Installation complete");
 
