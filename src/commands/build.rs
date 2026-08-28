@@ -27,7 +27,7 @@ pub fn execute(release: bool) -> Result<()> {
 
     terminal::info("Preparing dependencies...");
 
-    let dependencies = dependency::prepare_dependencies(&lockfile)?;
+    let dependencies = dependency::prepare_dependencies(&lockfile, &manifest.package.name)?;
 
     let include_dirs: Vec<String> = dependencies
         .iter()
@@ -45,6 +45,7 @@ pub fn execute(release: bool) -> Result<()> {
     let dependencies = lockfile
         .package
         .iter()
+        .filter(|pkg| pkg.name != manifest.package.name)
         .map(|pkg| pkg.name.clone())
         .collect::<Vec<_>>();
 
